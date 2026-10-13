@@ -12,6 +12,41 @@ One kernel per call encodes each rank's BF16 partial to NVFP4 (E2M1 values + E4M
 
 A pull variant family (peers TMA-load from each other's windows) is included as the measured comparison; it loses on VR200 at every tier.
 
+## GB200 TP2: FP8 transport
+
+This fork adds a [CuTe DSL FP8 AllReduce](harness/cute_fp8/ue8m0_lamport_batched.py) alongside the original NVFP4 kernels. See [implementation and quickstart](docs/FP8.md), [measurement details](docs/results/fp8_gb200_tp2.md), [timings plus seed-level accuracy data](docs/results/fp8_gb200_tp2.json), and the [four-format accuracy comparison](docs/results/fp8_format_accuracy.md).
+
+**Measured scope:** two GB200 GPUs over NVLink, hidden 6144, BF16 inputs and outputs. Quantization, communication, decode/reduction and synchronization are all timed. The NCCL baseline uses out-of-place BF16 Sum with default algorithm/channel selection; no NCCL tuning search or best-NCCL claim is made. NVFP4 is upstream TP2 L2 one-shot with default tuning. The upstream source is `2878bf50e20241d55500c2df76b87f0a81ef1c0f`; the VR200 results below remain a separate study.
+
+| Rows | BF16 NCCL default (µs) | FP8 group128 (µs) | NVFP4 L2 (µs) | FP8 speedup vs BF16 |
+| --: | --: | --: | --: | --: |
+| 1 | 11.722 | 5.869 | 6.352 | 1.995× |
+| 4 | 12.435 | 6.221 | 6.931 | 1.999× |
+| 16 | 12.458 | 6.227 | 6.701 | 1.998× |
+| 64 | 13.606 | 6.874 | 6.938 | 1.978× |
+| 1024 | 49.120 | 18.784 | 14.035 | 2.615× |
+| 4096 | 116.458 | 52.717 | 33.968 | 2.208× |
+| 16384 | 397.354 | 182.653 | 106.166 | 2.176× |
+
+Latencies are the median of three fresh sweep medians. Each sweep uses 200 paired rank-max samples after 20 warmups, with 10 complete calls per CUDA Graph replay. Speedups are medians of the three paired within-sweep ratios, not ratios of the aggregate medians. GPU clocks were not locked. Software: PyTorch 2.13.0+cu130, CUDA 13.0, CuTe DSL 4.6.2 and NCCL 2.31.2.
+
+The FP8 configuration is tile 2048, 152 CTAs and 7 teams, selected from six pilot configurations using rows 1024 and 16384; small shapes were not tuned independently. It uses E4M3 values with one UE8M0 power-of-two scale per **128 values**, `e=max(-120,ceil(log2(amax/448)))`, followed by rank-ordered FP32 multiply/add and BF16 output rounding. This custom group128 format is **not standard group32 MXFP8**. It applies no second output quantization.
+
+**Synthetic numerical error at 16384 × 6144, TP2.** All four formats use the same three seeded BF16 input pairs and the same unquantized FP32 sum reference. Inputs are Gaussian samples with 32 outliers per source. Ranges below are min–max over the three seeds. The actual AllReduce formats also reproduced the per-seed metrics from all three performance sweeps.
+
+| Format | Relative L2 error (%) | Max absolute error | Evidence |
+| --- | --: | --: | --- |
+| BF16 NCCL | 0.17780–0.17782 | 0.015625 | Measured AllReduce output |
+| Standard MXFP8 E4M3 + E8M0, group32 | 2.66322–2.66380 | 0.375 | Numerical reference; no AllReduce timing |
+| FP8 E4M3 + UE8M0, group128 | 2.66322–2.66380 | 0.375 | Measured AllReduce output |
+| NVFP4, block16 + row scale | 9.51402–9.51633 | 2.41797–2.43750 | Measured AllReduce output |
+
+The group32 reference uses [NVIDIA TensorRT’s round-up E8M0 scale recipe](https://docs.nvidia.com/deeplearning/tensorrt/10.x.x/inference-library/work-quantized-types.html#mx-compliant-dynamic-quantization), validated against an independent NumPy oracle. At this shape its FP32-reduced summary metrics match group128; this does not imply elementwise equivalence or equal error on other workloads. The [full comparison](docs/results/fp8_format_accuracy.json) contains all 84 shape/seed/format records.
+
+For reference `r` and BF16 output `y`, relative L2 is `100*sqrt(mean((float(y)-r)^2)/mean(r^2))`; max absolute error is `max(abs(float(y)-r))`. The harness computes these full-output metrics with FP32 arithmetic. NCCL additionally passed a full-output bitwise check against BF16-rounded direct FP32 addition. FP8 passed its independent codec/wire checks plus full-output finite, rank, graph, frozen-baseline and triple-buffer reuse checks. A relative L2 percentage is vector error, **not task-accuracy loss**; no model-accuracy or serving/end-to-end speedup is claimed.
+
+The FP8 workspace keeps three receive buffers. At the maximum shape above, its symmetric allocation is **304,352,832 bytes (290.253 MiB) per rank**, including device counters and excluding input/output tensors. Capacity scales with the workspace's configured maximum input size. See [FP8 implementation notes](docs/FP8.md) for the numerical domain and workspace lifecycle.
+
 ## Headline results (VR200, measured)
 
 CUDA graph, median of max over ranks, µs per call. HBM locked at 4752 MHz. Every cell passes the bitwise correctness gate. Repeat spread <= 1.9%. Details: [docs/RESULTS.md](docs/RESULTS.md).

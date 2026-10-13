@@ -1,0 +1,1460 @@
+{
+  "schema": "public_fp8_gb200_tp2_v1",
+  "status": "passed",
+  "scope": "Synthetic AllReduce operator timing and full-output numerical error; not model accuracy or serving throughput.",
+  "hardware": {
+    "gpu": "NVIDIA GB200",
+    "tp_size": 2,
+    "link": "NVLink",
+    "clocks_locked": false
+  },
+  "software": {
+    "torch": "2.13.0+cu130",
+    "cuda": "13.0",
+    "cutlass_dsl": "4.6.2",
+    "nccl_runtime": "2.31.2"
+  },
+  "upstream": {
+    "repository": "https://github.com/fans-nv/fp4-all-reduce",
+    "commit": "2878bf50e20241d55500c2df76b87f0a81ef1c0f"
+  },
+  "workload": {
+    "rows": [
+      1,
+      4,
+      16,
+      64,
+      1024,
+      4096,
+      16384
+    ],
+    "hidden": 6144,
+    "input_dtype": "bfloat16",
+    "output_dtype": "bfloat16",
+    "input_sets": 3,
+    "seed_formula": "1000 + 17*rows + 7777*input_set",
+    "same_seed_for_both_source_ranks": true,
+    "input_generator": "ref::gen_input then ref::gen_outliers; source magnitudes [1.0,0.5], Gaussian samples rounded to BF16,32 outliers per source at matched positions with magnitudes [40,20].",
+    "outlier_position_collisions_in_published_seed_set": 0
+  },
+  "formats": {
+    "bf16_nccl": {
+      "label": "BF16 NCCL",
+      "operation": "out-of-place ncclAllReduce, ncclBfloat16, ncclSum",
+      "correctness_reference": "Full output bitwise equal to BF16-RNE(FP32(x0)+FP32(x1)); signed-zero direct-add semantics. Error metrics still use the unrounded FP32 reference."
+    },
+    "fp8_e4m3_ue8m0_group128": {
+      "label": "FP8 E4M3 + UE8M0, group128",
+      "backend": "batched Lamport",
+      "group_size": 128,
+      "scale_rule": "e=max(-120,ceil(log2(amax/448))); scale=2**e; scale_code=e+127; zero group code7",
+      "arithmetic": "E4M3 RNE source quantization; separate rank-ordered FP32 multiply/add with +0 seed; BF16 RNE output; no second FP8 quantization",
+      "geometry": {
+        "tile_elems": 2048,
+        "ctas": 152,
+        "teams": 7
+      },
+      "standard_mxfp8": false
+    },
+    "nvfp4_l2": {
+      "label": "NVFP4 upstream L2",
+      "value_dtype": "E2M1",
+      "block_size": 16,
+      "block_scale_dtype": "E4M3",
+      "row_scale_dtype": "float32",
+      "variant": "L2",
+      "algorithm": "one-shot",
+      "tune": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "best_configuration_claim": false
+    }
+  },
+  "standard_mxfp8": {
+    "included_in_this_artifact": false,
+    "reason": "These measurements use custom group128 UE8M0 FP8; no standard group32 MXFP8 AllReduce timing was measured."
+  },
+  "timing_method": {
+    "fresh_sweeps": 3,
+    "warmups_per_cell": 20,
+    "paired_samples_per_cell_per_sweep": 200,
+    "collectives_per_sample": 10,
+    "timed_scope": "Full BF16-to-BF16 call including input quantization, communication, decode/reduction and internal synchronization. Compilation, allocation and one-float rank alignment are outside timing.",
+    "per_sweep_statistic": "For sample i, max(rank0_event_us_i,rank1_event_us_i)/10; sort200 values and use index100 (upper median). Archived samples are already per-call microseconds.",
+    "across_sweeps": "Median of the three sweep medians; range is min/max of these medians.",
+    "speedups": "Median of three paired within-sweep ratios; never ratio of aggregate medians."
+  },
+  "accuracy_method": {
+    "reference": "r_i=FP32_add_rn(FP32_add_rn(+0,float(x0_i)),float(x1_i)) for original BF16 inputs; no low-precision codec is applied to the reference.",
+    "error": "e_i=float(y_i)-r_i",
+    "relative_l2": "sqrt(mean(e_i**2)/mean(r_i**2)); if reference mean square is zero, use RMSE",
+    "rmse": "sqrt(mean(e_i**2))",
+    "max_abs": "max(abs(e_i))",
+    "reduction_precision": "FP32 tensor subtraction, squares and means in PyTorch; host square root. These are measured metrics, not an FP64 error recomputation.",
+    "aggregation": "One eager metric record per input_set and format. Eager/changed-graph/post-timing metrics were checked identical for the corresponding seed. All three sweeps gave identical metrics, so repeat copies are omitted. Ranges are min/max over the three seeds separately at each shape; no mean of relative-L2 ratios or pooling across shapes.",
+    "pairing": "Joined by rows,backend,input_set and expected seed; source-index, generator hash, reference hash and common build/source maps verified across sweeps. Original tensors are not archived.",
+    "scope": "Full-output error metrics. Independent FP8 codec and wire checks cover all groups for small tensors and sampled complete groups otherwise, supplemented by full-output finite/rank/graph/frozen-baseline and buffer-reuse gates.",
+    "raw_field": "results[(rows,backend)].checks[(mode=eager,input_set)].error_vs_original_fp32_sum",
+    "seed_count_per_shape_per_format": 3,
+    "matching_eager_records_across_all_sweeps": 189
+  },
+  "qualification": {
+    "all_declared_numerical_gates_passed": true,
+    "nccl_full_output_direct_fp32_sum_to_bf16_gate_passed": true,
+    "lifecycle_and_cleanup_passed": true,
+    "model_accuracy_qualified": false,
+    "serving_throughput_qualified": false,
+    "finite_input_is_not_sufficient_for_all_possible_inputs": "UE8M0 supported domain additionally requires finite decoded source terms/FP32 partial sums and BF16-representable output."
+  },
+  "source_sha256": {
+    "harness/ref.cuh": "d5d7463b1266975a12d2bb0e061fb6b39f00325a427a1030b09ebaf9895c9ff5",
+    "include/fp4_codec.cuh": "2418a01ffe3a68c76d5342d71a29bfe354ffd053e8d57462f588cbeb9cd85387",
+    "kernels/push/tp2_l2.cu": "4a3f350a7fff0dd37f43bc151189bdc03721d5cd3672f2c512931cd8c51958a8",
+    "harness/fp8_native_bridge.cu": "bc872f9607b81c5f2af17d7ccb495809959bc4f0d1cd484c8345327af11e78f3",
+    "harness/fp8_compare.py": "16fa660922f6de77cebe5611159cee4c2e57f945fb1bfe865d58f09848cfec98",
+    "harness/fp8_fused_compare.py": "a2b1be2557d1f1b1fa2532b8b0acecbba44c48bef25e6770203c5e27289e212e",
+    "harness/fp8_ue8m0_oracle.py": "3f829dfa52af4076d59643718342b3ce97ceb6a1eae31ec1ceb906fb5e3a02c6",
+    "harness/cute_fp8/ue8m0_lamport_batched.py": "c02631c399c1df8911c55b2ebd15ee7c2a4cbba600b3be2decdbdf4fe36081cb",
+    "ops/validate_fp8_fused.py": "2e66b100f2a1fdaf0d0d98149a50e89856bf22f7213ea0adf8fb1988a14a4620"
+  },
+  "raw_sweep_sha256": {
+    "sweep-1.json": "4fd1ae54d6c155cc8a652adebebf45f6edd937dddc8dda757a5e5c09d9d88706",
+    "sweep-2.json": "d0498f995333477757a5f4cd4e798df289fa56c1a8f2998a6b88dccab7514e34",
+    "sweep-3.json": "9a9ec2a5cb30df995120b60d3acfecd83efcf708c41cb8ce994996b91ce274df"
+  },
+  "results": [
+    {
+      "rows": 1,
+      "numel_per_rank": 6144,
+      "bf16_payload_bytes_per_rank": 12288,
+      "formats": {
+        "bf16_nccl": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 11.721599847078323,
+            "sweep_medians": [
+              11.641599982976913,
+              11.769600212574005,
+              11.721599847078323
+            ],
+            "min_sweep_median": 11.641599982976913,
+            "max_sweep_median": 11.769600212574005
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.0,
+            "paired_speedups": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0004359057580330499,
+                0.00045964682401010556
+              ],
+              "rmse": [
+                0.00194802511319799,
+                0.002057545099433553
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1017,
+                "max_abs": 0.015625,
+                "rmse": 0.00194802511319799,
+                "relative_l2": 0.0004359057580330499
+              },
+              {
+                "input_set": 1,
+                "seed": 8794,
+                "max_abs": 0.015625,
+                "rmse": 0.002021873670303541,
+                "relative_l2": 0.00045200909577408117
+              },
+              {
+                "input_set": 2,
+                "seed": 16571,
+                "max_abs": 0.015625,
+                "rmse": 0.002057545099433553,
+                "relative_l2": 0.00045964682401010556
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8_e4m3_ue8m0_group128": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 5.868799984455109,
+            "sweep_medians": [
+              5.868799984455109,
+              5.86559996008873,
+              5.875200033187866
+            ],
+            "min_sweep_median": 5.86559996008873,
+            "max_sweep_median": 5.875200033187866
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.995098001917429,
+            "paired_speedups": [
+              1.9836423142401203,
+              2.0065466947384465,
+              1.995098001917429
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0065843792013153156,
+                0.006748910443905641
+              ],
+              "rmse": [
+                0.029425020896393535,
+                0.030188428634165213
+              ],
+              "max_abs": [
+                0.171875,
+                0.1875
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1017,
+                "max_abs": 0.171875,
+                "rmse": 0.029425020896393535,
+                "relative_l2": 0.0065843792013153156
+              },
+              {
+                "input_set": 1,
+                "seed": 8794,
+                "max_abs": 0.1875,
+                "rmse": 0.030188428634165213,
+                "relative_l2": 0.006748910443905641
+              },
+              {
+                "input_set": 2,
+                "seed": 16571,
+                "max_abs": 0.171875,
+                "rmse": 0.030175703088727048,
+                "relative_l2": 0.0067411237259508
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "nvfp4_l2": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.351999938488007,
+            "sweep_medians": [
+              6.351999938488007,
+              6.348799914121628,
+              6.384000182151794
+            ],
+            "min_sweep_median": 6.348799914121628,
+            "max_sweep_median": 6.384000182151794
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.8360901492216803,
+            "paired_speedups": [
+              1.8327456070076746,
+              1.853830703720068,
+              1.8360901492216803
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.06331401170253324,
+                0.06494217679254968
+              ],
+              "rmse": [
+                0.28320875491103925,
+                0.29070462499947625
+              ],
+              "max_abs": [
+                2.453125,
+                2.48828125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1017,
+                "max_abs": 2.48828125,
+                "rmse": 0.28902257179597707,
+                "relative_l2": 0.06467401389942048
+              },
+              {
+                "input_set": 1,
+                "seed": 8794,
+                "max_abs": 2.453125,
+                "rmse": 0.28320875491103925,
+                "relative_l2": 0.06331401170253324
+              },
+              {
+                "input_set": 2,
+                "seed": 16571,
+                "max_abs": 2.453125,
+                "rmse": 0.29070462499947625,
+                "relative_l2": 0.06494217679254968
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 4,
+      "numel_per_rank": 24576,
+      "bf16_payload_bytes_per_rank": 49152,
+      "formats": {
+        "bf16_nccl": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 12.435200065374374,
+            "sweep_medians": [
+              12.41919994354248,
+              12.460800260305405,
+              12.435200065374374
+            ],
+            "min_sweep_median": 12.41919994354248,
+            "max_sweep_median": 12.460800260305405
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.0,
+            "paired_speedups": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.000813287472248114,
+                0.000824877707804632
+              ],
+              "rmse": [
+                0.0019829592995165364,
+                0.002010304628822564
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1068,
+                "max_abs": 0.015625,
+                "rmse": 0.002010304628822564,
+                "relative_l2": 0.000824877707804632
+              },
+              {
+                "input_set": 1,
+                "seed": 8845,
+                "max_abs": 0.015625,
+                "rmse": 0.0019948377508673784,
+                "relative_l2": 0.0008180329153539545
+              },
+              {
+                "input_set": 2,
+                "seed": 16622,
+                "max_abs": 0.015625,
+                "rmse": 0.0019829592995165364,
+                "relative_l2": 0.000813287472248114
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8_e4m3_ue8m0_group128": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.220800057053566,
+            "sweep_medians": [
+              6.220800057053566,
+              6.220800057053566,
+              6.220800057053566
+            ],
+            "min_sweep_median": 6.220800057053566,
+            "max_sweep_median": 6.220800057053566
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.9989711855912327,
+            "paired_speedups": [
+              1.9963991495693143,
+              2.003086443226302,
+              1.9989711855912327
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.012084008410927065,
+                0.01230535507192463
+              ],
+              "rmse": [
+                0.029449866099389172,
+                0.030007578392712102
+              ],
+              "max_abs": [
+                0.1875,
+                0.203125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1068,
+                "max_abs": 0.1875,
+                "rmse": 0.029449866099389172,
+                "relative_l2": 0.012084008410927065
+              },
+              {
+                "input_set": 1,
+                "seed": 8845,
+                "max_abs": 0.1875,
+                "rmse": 0.030007578392712102,
+                "relative_l2": 0.01230535507192463
+              },
+              {
+                "input_set": 2,
+                "seed": 16622,
+                "max_abs": 0.203125,
+                "rmse": 0.02974575594824823,
+                "relative_l2": 0.012199872519399815
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "nvfp4_l2": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.931199878454208,
+            "sweep_medians": [
+              6.931199878454208,
+              6.931199878454208,
+              6.934399902820587
+            ],
+            "min_sweep_median": 6.931199878454208,
+            "max_sweep_median": 6.934399902820587
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.7932626095469806,
+            "paired_speedups": [
+              1.7917821100712799,
+              1.7977840025996197,
+              1.7932626095469806
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.06752581956722872,
+                0.07000923368929865
+              ],
+              "rmse": [
+                0.16464160144773757,
+                0.1706190932477608
+              ],
+              "max_abs": [
+                2.33984375,
+                2.48046875
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1068,
+                "max_abs": 2.48046875,
+                "rmse": 0.1706190932477608,
+                "relative_l2": 0.07000923368929865
+              },
+              {
+                "input_set": 1,
+                "seed": 8845,
+                "max_abs": 2.4609375,
+                "rmse": 0.16935267976143398,
+                "relative_l2": 0.06944728526819458
+              },
+              {
+                "input_set": 2,
+                "seed": 16622,
+                "max_abs": 2.33984375,
+                "rmse": 0.16464160144773757,
+                "relative_l2": 0.06752581956722872
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 16,
+      "numel_per_rank": 98304,
+      "bf16_payload_bytes_per_rank": 196608,
+      "formats": {
+        "bf16_nccl": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 12.457600235939026,
+            "sweep_medians": [
+              12.457600235939026,
+              12.467200309038162,
+              12.438400089740753
+            ],
+            "min_sweep_median": 12.438400089740753,
+            "max_sweep_median": 12.467200309038162
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.0,
+            "paired_speedups": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0012761797357455694,
+                0.0012797070142484014
+              ],
+              "rmse": [
+                0.001980709580613872,
+                0.0019933692485722644
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1272,
+                "max_abs": 0.015625,
+                "rmse": 0.0019933692485722644,
+                "relative_l2": 0.0012797070142484014
+              },
+              {
+                "input_set": 1,
+                "seed": 9049,
+                "max_abs": 0.015625,
+                "rmse": 0.001980709580613872,
+                "relative_l2": 0.0012761797357455694
+              },
+              {
+                "input_set": 2,
+                "seed": 16826,
+                "max_abs": 0.015625,
+                "rmse": 0.0019876812664046924,
+                "relative_l2": 0.0012788394112149325
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8_e4m3_ue8m0_group128": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.2272001057863235,
+            "sweep_medians": [
+              6.2272001057863235,
+              6.246399879455566,
+              6.224000081419945
+            ],
+            "min_sweep_median": 6.224000081419945,
+            "max_sweep_median": 6.246399879455566
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.9984575718230155,
+            "paired_speedups": [
+              2.0005138785187593,
+              1.9959017273362265,
+              1.9984575718230155
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.019003837439786203,
+                0.019149055088269383
+              ],
+              "rmse": [
+                0.029601826617778427,
+                0.029763094360803568
+              ],
+              "max_abs": [
+                0.1875,
+                0.203125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1272,
+                "max_abs": 0.1875,
+                "rmse": 0.029601826617778427,
+                "relative_l2": 0.019003837439786203
+              },
+              {
+                "input_set": 1,
+                "seed": 9049,
+                "max_abs": 0.1953125,
+                "rmse": 0.029612072496850276,
+                "relative_l2": 0.01907918617841837
+              },
+              {
+                "input_set": 2,
+                "seed": 16826,
+                "max_abs": 0.203125,
+                "rmse": 0.029763094360803568,
+                "relative_l2": 0.019149055088269383
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "nvfp4_l2": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.700800359249115,
+            "sweep_medians": [
+              6.700800359249115,
+              6.700800359249115,
+              6.668800115585327
+            ],
+            "min_sweep_median": 6.668800115585327,
+            "max_sweep_median": 6.700800359249115
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.8605539100757844,
+            "paired_speedups": [
+              1.859121234487131,
+              1.8605539100757844,
+              1.8651631289220343
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.08045612883678861,
+                0.08153858502247661
+              ],
+              "rmse": [
+                0.12532460266041162,
+                0.12673422207433338
+              ],
+              "max_abs": [
+                2.3984375,
+                2.4609375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1272,
+                "max_abs": 2.4609375,
+                "rmse": 0.12532460266041162,
+                "relative_l2": 0.08045612883678861
+              },
+              {
+                "input_set": 1,
+                "seed": 9049,
+                "max_abs": 2.4453125,
+                "rmse": 0.126467377037097,
+                "relative_l2": 0.081483477127231
+              },
+              {
+                "input_set": 2,
+                "seed": 16826,
+                "max_abs": 2.3984375,
+                "rmse": 0.12673422207433338,
+                "relative_l2": 0.08153858502247661
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 64,
+      "numel_per_rank": 393216,
+      "bf16_payload_bytes_per_rank": 786432,
+      "formats": {
+        "bf16_nccl": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 13.606399297714233,
+            "sweep_medians": [
+              13.606399297714233,
+              13.680000603199005,
+              13.436800241470337
+            ],
+            "min_sweep_median": 13.436800241470337,
+            "max_sweep_median": 13.680000603199005
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.0,
+            "paired_speedups": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0015955381165640849,
+                0.0016047371759947717
+              ],
+              "rmse": [
+                0.001981964226600173,
+                0.001997418777449876
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 2088,
+                "max_abs": 0.015625,
+                "rmse": 0.001997418777449876,
+                "relative_l2": 0.0016047371759947717
+              },
+              {
+                "input_set": 1,
+                "seed": 9865,
+                "max_abs": 0.015625,
+                "rmse": 0.001981964226600173,
+                "relative_l2": 0.001596415612449538
+              },
+              {
+                "input_set": 2,
+                "seed": 17642,
+                "max_abs": 0.015625,
+                "rmse": 0.001982770095197663,
+                "relative_l2": 0.0015955381165640849
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8_e4m3_ue8m0_group128": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.87360018491745,
+            "sweep_medians": [
+              6.8800002336502075,
+              6.87360018491745,
+              6.8512000143527985
+            ],
+            "min_sweep_median": 6.8512000143527985,
+            "max_sweep_median": 6.8800002336502075
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.9776742493648596,
+            "paired_speedups": [
+              1.9776742493648596,
+              1.9902234979009472,
+              1.9612330997958245
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.024004167860737675,
+                0.024072348792817708
+              ],
+              "rmse": [
+                0.02982990233844651,
+                0.02989563814756042
+              ],
+              "max_abs": [
+                0.234375,
+                0.328125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 2088,
+                "max_abs": 0.328125,
+                "rmse": 0.02989563814756042,
+                "relative_l2": 0.024018319281411467
+              },
+              {
+                "input_set": 1,
+                "seed": 9865,
+                "max_abs": 0.234375,
+                "rmse": 0.029886035807680168,
+                "relative_l2": 0.024072348792817708
+              },
+              {
+                "input_set": 2,
+                "seed": 17642,
+                "max_abs": 0.265625,
+                "rmse": 0.02982990233844651,
+                "relative_l2": 0.024004167860737675
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "nvfp4_l2": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.937599927186966,
+            "sweep_medians": [
+              6.934399902820587,
+              6.937599927186966,
+              6.937599927186966
+            ],
+            "min_sweep_median": 6.934399902820587,
+            "max_sweep_median": 6.937599927186966
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.9621595939657002,
+            "paired_speedups": [
+              1.9621595939657002,
+              1.9718635762765762,
+              1.9368081732148317
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0894823999699128,
+                0.09033235572298469
+              ],
+              "rmse": [
+                0.11109319795398928,
+                0.1122557284573011
+              ],
+              "max_abs": [
+                2.42578125,
+                2.49609375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 2088,
+                "max_abs": 2.42578125,
+                "rmse": 0.1113975960659398,
+                "relative_l2": 0.08949743826464478
+              },
+              {
+                "input_set": 1,
+                "seed": 9865,
+                "max_abs": 2.46875,
+                "rmse": 0.11109319795398928,
+                "relative_l2": 0.0894823999699128
+              },
+              {
+                "input_set": 2,
+                "seed": 17642,
+                "max_abs": 2.49609375,
+                "rmse": 0.1122557284573011,
+                "relative_l2": 0.09033235572298469
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 1024,
+      "numel_per_rank": 6291456,
+      "bf16_payload_bytes_per_rank": 12582912,
+      "formats": {
+        "bf16_nccl": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 49.12000000476837,
+            "sweep_medians": [
+              49.12000000476837,
+              49.11360144615173,
+              49.18079972267151
+            ],
+            "min_sweep_median": 49.11360144615173,
+            "max_sweep_median": 49.18079972267151
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.0,
+            "paired_speedups": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0017653725265207045,
+                0.001766477562700242
+              ],
+              "rmse": [
+                0.001988632889580902,
+                0.001989016109196469
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 18408,
+                "max_abs": 0.015625,
+                "rmse": 0.001988632889580902,
+                "relative_l2": 0.0017653725265207045
+              },
+              {
+                "input_set": 1,
+                "seed": 26185,
+                "max_abs": 0.015625,
+                "rmse": 0.001989016109196469,
+                "relative_l2": 0.0017662222773071263
+              },
+              {
+                "input_set": 2,
+                "seed": 33962,
+                "max_abs": 0.015625,
+                "rmse": 0.0019887091506819014,
+                "relative_l2": 0.001766477562700242
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8_e4m3_ue8m0_group128": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 18.783999979496002,
+            "sweep_medians": [
+              18.771199882030487,
+              18.783999979496002,
+              18.806399405002594
+            ],
+            "min_sweep_median": 18.771199882030487,
+            "max_sweep_median": 18.806399405002594
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 2.6151098178628054,
+            "paired_speedups": [
+              2.6167746501804894,
+              2.6146508464524345,
+              2.6151098178628054
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.02642392546605598,
+                0.026462339806895416
+              ],
+              "rmse": [
+                0.029765665016435273,
+                0.029791432641795228
+              ],
+              "max_abs": [
+                0.375,
+                0.375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 18408,
+                "max_abs": 0.375,
+                "rmse": 0.029765665016435273,
+                "relative_l2": 0.02642392546605598
+              },
+              {
+                "input_set": 1,
+                "seed": 26185,
+                "max_abs": 0.375,
+                "rmse": 0.02977859510792175,
+                "relative_l2": 0.02644303272524434
+              },
+              {
+                "input_set": 2,
+                "seed": 33962,
+                "max_abs": 0.375,
+                "rmse": 0.029791432641795228,
+                "relative_l2": 0.026462339806895416
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "nvfp4_l2": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 14.035199582576752,
+            "sweep_medians": [
+              14.095999300479889,
+              14.022399485111237,
+              14.035199582576752
+            ],
+            "min_sweep_median": 14.022399485111237,
+            "max_sweep_median": 14.095999300479889
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 3.5025105010237216,
+            "paired_speedups": [
+              3.4846766772396274,
+              3.5025105010237216,
+              3.504104051624915
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.09474861664234538,
+                0.09482417370151354
+              ],
+              "rmse": [
+                0.10667676872079385,
+                0.10678543208112759
+              ],
+              "max_abs": [
+                2.32421875,
+                2.453125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 18408,
+                "max_abs": 2.33984375,
+                "rmse": 0.10673113604447532,
+                "relative_l2": 0.09474861664234538
+              },
+              {
+                "input_set": 1,
+                "seed": 26185,
+                "max_abs": 2.453125,
+                "rmse": 0.10678543208112759,
+                "relative_l2": 0.09482417370151354
+              },
+              {
+                "input_set": 2,
+                "seed": 33962,
+                "max_abs": 2.32421875,
+                "rmse": 0.10667676872079385,
+                "relative_l2": 0.09475599704563689
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 4096,
+      "numel_per_rank": 25165824,
+      "bf16_payload_bytes_per_rank": 50331648,
+      "formats": {
+        "bf16_nccl": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 116.45760536193848,
+            "sweep_medians": [
+              116.48319959640503,
+              116.45760536193848,
+              116.39360189437866
+            ],
+            "min_sweep_median": 116.39360189437866,
+            "max_sweep_median": 116.48319959640503
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.0,
+            "paired_speedups": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0017752676092720342,
+                0.001776068136610327
+              ],
+              "rmse": [
+                0.0019878879609473,
+                0.0019893664527365308
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 70632,
+                "max_abs": 0.015625,
+                "rmse": 0.0019893664527365308,
+                "relative_l2": 0.001776068136610327
+              },
+              {
+                "input_set": 1,
+                "seed": 78409,
+                "max_abs": 0.015625,
+                "rmse": 0.0019883598348510692,
+                "relative_l2": 0.0017753575452013062
+              },
+              {
+                "input_set": 2,
+                "seed": 86186,
+                "max_abs": 0.015625,
+                "rmse": 0.0019878879609473,
+                "relative_l2": 0.0017752676092720342
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8_e4m3_ue8m0_group128": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 52.71679759025574,
+            "sweep_medians": [
+              52.60800123214722,
+              52.80640125274658,
+              52.71679759025574
+            ],
+            "min_sweep_median": 52.60800123214722,
+            "max_sweep_median": 52.80640125274658
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 2.2079034997355955,
+            "paired_speedups": [
+              2.214172689861206,
+              2.205369095396957,
+              2.2079034997355955
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.02658820004257599,
+                0.02659658934805548
+              ],
+              "rmse": [
+                0.02977261709268089,
+                0.029787571605867643
+              ],
+              "max_abs": [
+                0.359375,
+                0.375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 70632,
+                "max_abs": 0.375,
+                "rmse": 0.029783327015222526,
+                "relative_l2": 0.02658998197200822
+              },
+              {
+                "input_set": 1,
+                "seed": 78409,
+                "max_abs": 0.359375,
+                "rmse": 0.029787571605867643,
+                "relative_l2": 0.02659658934805548
+              },
+              {
+                "input_set": 2,
+                "seed": 86186,
+                "max_abs": 0.375,
+                "rmse": 0.02977261709268089,
+                "relative_l2": 0.02658820004257599
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "nvfp4_l2": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 33.96799862384796,
+            "sweep_medians": [
+              34.04799997806549,
+              33.96799862384796,
+              33.96480083465576
+            ],
+            "min_sweep_median": 33.96480083465576,
+            "max_sweep_median": 34.04799997806549
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 3.426888986071051,
+            "paired_speedups": [
+              3.4211466068916296,
+              3.4284506029206243,
+              3.426888986071051
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.09505773967479433,
+                0.09507767568030306
+              ],
+              "rmse": [
+                0.10646494413156629,
+                0.10647981417006334
+              ],
+              "max_abs": [
+                2.44140625,
+                2.484375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 70632,
+                "max_abs": 2.45703125,
+                "rmse": 0.10647377456076064,
+                "relative_l2": 0.09505773967479433
+              },
+              {
+                "input_set": 1,
+                "seed": 78409,
+                "max_abs": 2.484375,
+                "rmse": 0.10647981417006334,
+                "relative_l2": 0.09507320465091483
+              },
+              {
+                "input_set": 2,
+                "seed": 86186,
+                "max_abs": 2.44140625,
+                "rmse": 0.10646494413156629,
+                "relative_l2": 0.09507767568030306
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 16384,
+      "numel_per_rank": 100663296,
+      "bf16_payload_bytes_per_rank": 201326592,
+      "formats": {
+        "bf16_nccl": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 397.3536014556885,
+            "sweep_medians": [
+              397.3536014556885,
+              397.33760356903076,
+              397.40800857543945
+            ],
+            "min_sweep_median": 397.33760356903076,
+            "max_sweep_median": 397.40800857543945
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 1.0,
+            "paired_speedups": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0017779853950321365,
+                0.0017781907873679315
+              ],
+              "rmse": [
+                0.0019884110640564666,
+                0.001988884757329316
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 279528,
+                "max_abs": 0.015625,
+                "rmse": 0.0019884110640564666,
+                "relative_l2": 0.0017779853950321365
+              },
+              {
+                "input_set": 1,
+                "seed": 287305,
+                "max_abs": 0.015625,
+                "rmse": 0.001988884757329316,
+                "relative_l2": 0.0017779985571356807
+              },
+              {
+                "input_set": 2,
+                "seed": 295082,
+                "max_abs": 0.015625,
+                "rmse": 0.001988805187488376,
+                "relative_l2": 0.0017781907873679315
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8_e4m3_ue8m0_group128": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 182.65279531478882,
+            "sweep_medians": [
+              182.5600028038025,
+              182.65279531478882,
+              182.65600204467773
+            ],
+            "min_sweep_median": 182.5600028038025,
+            "max_sweep_median": 182.65600204467773
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 2.175718312712403,
+            "paired_speedups": [
+              2.1765643917234434,
+              2.1753710524070997,
+              2.175718312712403
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.026632244028959463,
+                0.026637962138296747
+              ],
+              "rmse": [
+                0.029784752694507248,
+                0.02979304451530809
+              ],
+              "max_abs": [
+                0.375,
+                0.375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 279528,
+                "max_abs": 0.375,
+                "rmse": 0.029784752694507248,
+                "relative_l2": 0.026632750261127144
+              },
+              {
+                "input_set": 1,
+                "seed": 287305,
+                "max_abs": 0.375,
+                "rmse": 0.029791061410085324,
+                "relative_l2": 0.026632244028959463
+              },
+              {
+                "input_set": 2,
+                "seed": 295082,
+                "max_abs": 0.375,
+                "rmse": 0.02979304451530809,
+                "relative_l2": 0.026637962138296747
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "nvfp4_l2": {
+          "timing_us": {
+            "median_of_three_sweep_medians": 106.16639852523804,
+            "sweep_medians": [
+              106.16320371627808,
+              106.23040199279785,
+              106.16639852523804
+            ],
+            "min_sweep_median": 106.16320371627808,
+            "max_sweep_median": 106.23040199279785
+          },
+          "speedup_vs_bf16_nccl": {
+            "median_of_three_paired_speedups": 3.7428561643412612,
+            "paired_speedups": [
+              3.7428561643412612,
+              3.7403379457791117,
+              3.7432560028017434
+            ],
+            "ratio_definition": "NCCL sweep median / this format sweep median, paired within the same sweep and shape"
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.09514019324855968,
+                0.0951632687911296
+              ],
+              "rmse": [
+                0.10641639649192705,
+                0.10642590039534121
+              ],
+              "max_abs": [
+                2.41796875,
+                2.4375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 279528,
+                "max_abs": 2.41796875,
+                "rmse": 0.10642590039534121,
+                "relative_l2": 0.0951632687911296
+              },
+              {
+                "input_set": 1,
+                "seed": 287305,
+                "max_abs": 2.4375,
+                "rmse": 0.10642465338456744,
+                "relative_l2": 0.09514019324855968
+              },
+              {
+                "input_set": 2,
+                "seed": 295082,
+                "max_abs": 2.42578125,
+                "rmse": 0.10641639649192705,
+                "relative_l2": 0.095146903808015
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    }
+  ]
+}
