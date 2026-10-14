@@ -1,5 +1,7 @@
 # GB200 TP2 FP8 AllReduce results
 
+**Historical study:** these timings cover the original group128 implementation. A later [four-format comparison](fp8_group32_gb200_tp2.md) measures group32 and group128 kernels together at the same geometry; the original values below remain unchanged.
+
 All formats use the same BF16 source tensors, shape/seed pairing and unquantized FP32 sum reference. Inputs are synthetic Gaussian samples with 32 outliers per source. Hidden size is 6144; source magnitudes are 1.0 and 0.5. These are operator measurements, not model-quality results.
 
 **Format naming:** the measured FP8 implementation uses E4M3 values with one UE8M0 scale per 128 values. It is a custom group128 format, not standard group32 MXFP8. No standard MXFP8 AllReduce timing is included.

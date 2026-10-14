@@ -1,0 +1,2276 @@
+{
+  "schema": "public_fp8_group32_gb200_tp2_v1",
+  "status": "passed",
+  "measurement_date_utc": "2026-10-14",
+  "scope": "Synthetic complete BF16-to-BF16 TP2 AllReduce timing and numerical error; no model accuracy or serving throughput qualification.",
+  "hardware": {
+    "gpu": "NVIDIA GB200",
+    "tp_size": 2,
+    "link": "NVLink",
+    "clocks_locked": false
+  },
+  "software": {
+    "torch": "2.13.0+cu130",
+    "cuda": "13.0",
+    "cutlass_dsl": "4.6.2",
+    "nccl_runtime": "2.31.2"
+  },
+  "upstream": {
+    "repository": "https://github.com/fans-nv/fp4-all-reduce",
+    "commit": "2878bf50e20241d55500c2df76b87f0a81ef1c0f"
+  },
+  "workload": {
+    "rows": [
+      1,
+      4,
+      16,
+      64,
+      1024,
+      4096,
+      16384
+    ],
+    "hidden": 6144,
+    "input_dtype": "bfloat16",
+    "output_dtype": "bfloat16",
+    "input_sets": 3,
+    "seed_formula": "1000 + 17*rows + 7777*input_set",
+    "same_seed_for_both_source_ranks": true,
+    "input_generator": "ref::gen_input then ref::gen_outliers; source magnitudes [1.0,0.5], Gaussian samples rounded to BF16,32 outliers per source at matched positions with magnitudes [40,20].",
+    "outlier_position_collisions_in_published_seed_set": 0
+  },
+  "formats": {
+    "nccl": {
+      "label": "BF16 NCCL",
+      "operation": "out-of-place ncclAllReduce, ncclBfloat16, ncclSum",
+      "correctness_reference": "Full output bitwise equal to BF16-RNE(FP32(x0)+FP32(x1)); signed-zero direct-add semantics. Error metrics still use the unrounded FP32 reference."
+    },
+    "fp8-ue8m0-lamport-batched": {
+      "label": "FP8 E4M3 + UE8M0, group128",
+      "backend": "batched Lamport",
+      "group_size": 128,
+      "scale_rule": "e=max(-120,ceil(log2(amax/448))); scale=2**e; scale_code=e+127; zero group code7",
+      "arithmetic": "E4M3 RNE source quantization; separate rank-ordered FP32 multiply/add with +0 seed; BF16 RNE output; no second FP8 quantization",
+      "geometry": {
+        "tile_elems": 2048,
+        "ctas": 152,
+        "teams": 7
+      },
+      "standard_mxfp8": false
+    },
+    "fp4": {
+      "label": "NVFP4 upstream L2",
+      "value_dtype": "E2M1",
+      "block_size": 16,
+      "block_scale_dtype": "E4M3",
+      "row_scale_dtype": "float32",
+      "variant": "L2",
+      "algorithm": "one-shot",
+      "tune": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "best_configuration_claim": false
+    },
+    "fp8-mxfp8-lamport-batched": {
+      "format": "OCP MXFP8 E4M3",
+      "group_size": 32,
+      "element_format": "E4M3FN",
+      "scale_format": "E8M0",
+      "recipe": "NVIDIA TensorRT round-up-to-E8M0",
+      "scale_rule": "e=max(-127,ceil(log2(amax/448))); scale=2**e; byte=e+127",
+      "scale_floor_exponent": -127,
+      "zero_scale_code": 0,
+      "input_output_dtype": "BF16",
+      "rounding": "E4M3 RNE with finite saturation; BF16 RNE",
+      "accumulation": "separate FP32 multiply/add; +0 seed; source0 then source1",
+      "second_output_quantization": false,
+      "communication_kernel": true,
+      "performance_measured": true,
+      "model_accuracy_qualified": false,
+      "sources": [
+        "https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf",
+        "https://docs.nvidia.com/deeplearning/tensorrt/10.x.x/inference-library/work-quantized-types.html#mx-compliant-dynamic-quantization"
+      ],
+      "label": "MXFP8 E4M3 + E8M0, group32",
+      "backend": "batched Lamport",
+      "geometry": {
+        "tile_elems": 2048,
+        "ctas": 152,
+        "teams": 7
+      },
+      "geometry_independently_tuned": false,
+      "code0_scale": "2**-127 (nonzero FP32 subnormal)",
+      "supported_numerics": "finite decoded source terms and FP32 partial sums, BF16-representable output"
+    }
+  },
+  "timing_method": {
+    "fresh_sweeps": 3,
+    "warmups_per_cell": 20,
+    "paired_samples_per_cell_per_sweep": 200,
+    "collectives_per_sample": 10,
+    "timed_scope": "Full BF16-to-BF16 call including input quantization, communication, decode/reduction and internal synchronization. Compilation, allocation and one-float rank alignment are outside timing.",
+    "per_sweep_statistic": "For sample i, max(rank0_event_us_i,rank1_event_us_i)/10; sort200 values and use index100 (upper median). Archived samples are already per-call microseconds.",
+    "across_sweeps": "Median of the three sweep medians; range is min/max of these medians.",
+    "speedups": "Median of three paired within-sweep ratios; never ratio of aggregate medians."
+  },
+  "comparison": {
+    "same_allocation": true,
+    "same_process_for_all_backends_in_each_sweep": true,
+    "backend_order": [
+      "nccl",
+      "fp4",
+      "fp8-ue8m0-lamport-batched",
+      "fp8-mxfp8-lamport-batched"
+    ],
+    "fresh_formal_processes": 3,
+    "shared_fp8_geometry": {
+      "tile_elems": 2048,
+      "ctas": 152,
+      "teams": 7
+    },
+    "group32_geometry_independently_tuned": false,
+    "geometry_selection": "Inherited group128 pilot selection; no new tuning search for group32."
+  },
+  "collective_settings": {
+    "nccl_algorithm_override": null,
+    "nccl_protocol_override": null,
+    "nccl_channel_override": null,
+    "nccl_tuning_search": false,
+    "nccl_ib_sl": 1,
+    "nccl_socket_interface_explicitly_set": true,
+    "loaded_nccl_same_file_verified_for_torch_and_bridge": true,
+    "note": "NCCL_SOCKET_IFNAME selected the host control-network interface; NCCL_HOME/LIB/INC selected the audited 2.31.2 installation. Host interface/path identifiers are omitted."
+  },
+  "accuracy_method": {
+    "reference": "r_i=FP32_add_rn(FP32_add_rn(+0,float(x0_i)),float(x1_i)) for original BF16 inputs; no low-precision codec is applied to the reference.",
+    "error": "e_i=float(y_i)-r_i",
+    "relative_l2": "sqrt(mean(e_i**2)/mean(r_i**2)); if reference mean square is zero, use RMSE",
+    "rmse": "sqrt(mean(e_i**2))",
+    "max_abs": "max(abs(e_i))",
+    "reduction_precision": "FP32 tensor subtraction, squares and means in PyTorch; host square root. These are measured metrics, not an FP64 error recomputation.",
+    "aggregation": "One eager metric record per input_set and format. All recorded eager, changed-graph and post-timing metrics agree for each seed across all three sweeps. Ranges are min/max over three seeds at each shape.",
+    "pairing": "Joined by rows/backend/input_set and expected seed; the common input generator/reference sources and native bridge binary hashes were verified across all sweeps. Original input tensors are not archived.",
+    "scope": "Actual group32 collective: full GPU numerical reference plus independent sampled NumPy output/received-wire checks. All reference work is untimed. Group128 retains its original independent oracle and frozen-baseline gates.",
+    "raw_field": "results[(rows,backend)].checks[(mode=eager,input_set)].error_vs_original_fp32_sum",
+    "seed_count_per_shape_per_format": 3,
+    "matching_eager_records_across_all_sweeps": 252
+  },
+  "qualification": {
+    "all_declared_numerical_gates_passed": true,
+    "formal_cells": 84,
+    "smoke_cells": 12,
+    "protocol_checks_per_process": 5,
+    "full_group32_output_bitwise_reference_passed": true,
+    "group32_scale_code0_subnormal_signed_zero_and_partial_group_edges_passed": true,
+    "nccl_full_output_direct_fp32_sum_to_bf16_gate_passed": true,
+    "lifecycle_and_cleanup_passed": true,
+    "model_accuracy_qualified": false,
+    "serving_throughput_qualified": false
+  },
+  "workspaces": {
+    "fp8-ue8m0-lamport-batched": {
+      "backend": "fp8-ue8m0-lamport-batched",
+      "poll_batch_groups": 4,
+      "reset_batch_tiles": 4,
+      "world_size": 2,
+      "group_size": 128,
+      "max_numel": 100663296,
+      "tile_elems": 2048,
+      "ctas": 152,
+      "teams_per_cta": 7,
+      "threads_per_cta": 480,
+      "worker_warps_per_cta": 14,
+      "reset_warps_per_cta": 1,
+      "team_stride_bytes": 8320,
+      "shared_memory_bytes": 60360,
+      "device_shared_memory_limit_bytes": 232448,
+      "wire_bytes_per_tile": 2064,
+      "valid_wire_bytes": 2064,
+      "receive_buffers": 3,
+      "receive_buffer_stride_bytes": 101449728,
+      "wire_layout": "tile_major_fp8_bytes_then_ue8m0_group_scales_then_zero_padding",
+      "state_layout": "cta_call_counters_then_previous_tile_counts_then_completed_epochs",
+      "scale_format": "UE8M0",
+      "scale_floor_exponent": -120,
+      "zero_scale_code": 7,
+      "input_pipeline_stages": 1,
+      "outgoing_pipeline_stages": 2,
+      "supported_numerics": "finite_source_terms_and_fp32_partials_and_bf16_representable_output",
+      "overflow_policy": "unsupported_inputs_can_produce_nonfinite_output; no_saturation",
+      "source_sha256": "c02631c399c1df8911c55b2ebd15ee7c2a4cbba600b3be2decdbdf4fe36081cb",
+      "baseline_source_sha256": "3b92a6af3115b286b4ee3a65f5c9d8a97f6c15c305247999209deba0a4f3b032",
+      "unbatched_source_sha256": "0e7896f7820f18bae7bcc9a76d3724ff8c0ac13bd8fa7a7eb0711a0c29790fc9",
+      "symmetric_allocation_count": 2,
+      "symmetric_bytes_per_rank": 304352832,
+      "allocator_backend": "CUDA",
+      "requires_serial_use": true,
+      "protocol": "payload_ff_lamport_triple_buffer",
+      "payload_sentinel": 255,
+      "end_of_call_handshake": false,
+      "polls_padded_groups": true,
+      "cooperative_launch": true,
+      "numeric_contract": "tp2_fp8_ue8m0_group128_oneshot_v1"
+    },
+    "fp8-mxfp8-lamport-batched": {
+      "backend": "fp8-mxfp8-lamport-batched",
+      "poll_batch_groups": 4,
+      "reset_batch_tiles": 4,
+      "world_size": 2,
+      "group_size": 32,
+      "max_numel": 100663296,
+      "tile_elems": 2048,
+      "ctas": 152,
+      "teams_per_cta": 7,
+      "threads_per_cta": 480,
+      "worker_warps_per_cta": 14,
+      "reset_warps_per_cta": 1,
+      "team_stride_bytes": 8320,
+      "shared_memory_bytes": 60408,
+      "device_shared_memory_limit_bytes": 232448,
+      "wire_bytes_per_tile": 2112,
+      "valid_wire_bytes": 2112,
+      "receive_buffers": 3,
+      "receive_buffer_stride_bytes": 103809024,
+      "wire_layout": "tile_major_fp8_bytes_then_e8m0_group32_scales_then_zero_padding",
+      "state_layout": "cta_call_counters_then_previous_tile_counts_then_completed_epochs",
+      "scale_format": "E8M0",
+      "scale_floor_exponent": -127,
+      "zero_scale_code": 0,
+      "input_pipeline_stages": 1,
+      "outgoing_pipeline_stages": 2,
+      "supported_numerics": "finite_source_terms_and_fp32_partials_and_bf16_representable_output",
+      "overflow_policy": "unsupported_inputs_can_produce_nonfinite_output; no_saturation",
+      "source_sha256": "ca666b3df15ec553f4730d578fe86807af31488b9f9277fd922099b12930379b",
+      "baseline_source_sha256": "c02631c399c1df8911c55b2ebd15ee7c2a4cbba600b3be2decdbdf4fe36081cb",
+      "group128_source_sha256": "c02631c399c1df8911c55b2ebd15ee7c2a4cbba600b3be2decdbdf4fe36081cb",
+      "scale_recipe": "NVIDIA TensorRT round-up-to-E8M0",
+      "standard_mxfp8": true,
+      "lanes_per_group": 8,
+      "values_per_lane": 4,
+      "symmetric_allocation_count": 2,
+      "symmetric_bytes_per_rank": 311430720,
+      "allocator_backend": "CUDA",
+      "requires_serial_use": true,
+      "protocol": "payload_ff_lamport_triple_buffer",
+      "payload_sentinel": 255,
+      "end_of_call_handshake": false,
+      "polls_padded_groups": true,
+      "cooperative_launch": true,
+      "numeric_contract": "tp2_mxfp8_e4m3_group32_e8m0_round_up_reference_v1"
+    }
+  },
+  "source_sha256": {
+    "include/codec_fast.cuh": "8985ea3a59f94a8ee178f07dfcb1cf55fa37caff10ed1a6d0a9e3b4f3cd9c916",
+    "include/fp4_codec.cuh": "2418a01ffe3a68c76d5342d71a29bfe354ffd053e8d57462f588cbeb9cd85387",
+    "kernels/push/tp2_l2.cu": "4a3f350a7fff0dd37f43bc151189bdc03721d5cd3672f2c512931cd8c51958a8",
+    "harness/cute_fp8/fused.py": "fff8699e6499e8e362fdb149aa66d8796f1233ea42b59a1b55001877103f2773",
+    "harness/cute_fp8/kernels.py": "2a008f18fb171d6d91c6c7a78523f7328470d163bcb10fca2ae011f0a1e4d07f",
+    "harness/cute_fp8/mxfp8_lamport_batched.py": "ca666b3df15ec553f4730d578fe86807af31488b9f9277fd922099b12930379b",
+    "harness/cute_fp8/reference.py": "fd079bbc21d25d101589e2a26103b56245891d94b202f9bf70defc505d7a081e",
+    "harness/cute_fp8/ue8m0.py": "3b92a6af3115b286b4ee3a65f5c9d8a97f6c15c305247999209deba0a4f3b032",
+    "harness/cute_fp8/ue8m0_lamport_batched.py": "c02631c399c1df8911c55b2ebd15ee7c2a4cbba600b3be2decdbdf4fe36081cb",
+    "harness/fp8_compare.py": "16fa660922f6de77cebe5611159cee4c2e57f945fb1bfe865d58f09848cfec98",
+    "harness/fp8_format_accuracy.py": "efc5ec1efa68eea6e730a3f8f1d20cdb4010db9755c0411669f14a35c51bcdd4",
+    "harness/fp8_fused_compare.py": "a2b1be2557d1f1b1fa2532b8b0acecbba44c48bef25e6770203c5e27289e212e",
+    "harness/fp8_fused_oracle.py": "0902c88d5f83b2bac991c2c9878b32c8fd2d34415784e425fe6e965209be1fa7",
+    "harness/fp8_group32_compare.py": "9ff066ad99d721a74a0c21f1a341e06d2cecfc7217e507e6bbe8c12d94a4ba35",
+    "harness/fp8_native_bridge.cu": "bc872f9607b81c5f2af17d7ccb495809959bc4f0d1cd484c8345327af11e78f3",
+    "harness/fp8_native_bridge.h": "64bdc63ba58fe16a7e0badcf6a96aebd21845972989d1f14e617557a95b847c0",
+    "harness/fp8_oracle.py": "cf4865599e4d8bb712b62b77fd6af4ce4166d4675481256e5f9e00da2c9e7573",
+    "harness/fp8_ue8m0_oracle.py": "3f829dfa52af4076d59643718342b3ce97ceb6a1eae31ec1ceb906fb5e3a02c6",
+    "harness/ref.cuh": "d5d7463b1266975a12d2bb0e061fb6b39f00325a427a1030b09ebaf9895c9ff5"
+  },
+  "bridge_binary_sha256": "ea54c35025db68610761f9f3ef332d983f7e1d2cb002e36fd5cae43d38534a4e",
+  "raw_report_sha256": {
+    "group32-sweep-1.json": "4af0d41e7277aae4dd844f9c09561570c3ad5b141ab58f2c4725cd6f01a17e8b",
+    "group32-sweep-2.json": "11782ab24de8db8ae5be12b19b2121b75505f55f5caa7c56dce9808bef5eee16",
+    "group32-sweep-3.json": "583ad3caed90b5c78bb048734b6f19c2214dc8e943624e542d96c25e45784ca1"
+  },
+  "smoke_report_sha256": "fb58859b70e5acb8c52e6bd11b0223cb65688b32d1033025283b04781369fd02",
+  "raw_reports_note": "Hashes identify private complete reports. Public JSON retains per-sweep timings, paired ratios and measured per-seed errors; it omits host paths and scheduler metadata.",
+  "results": [
+    {
+      "rows": 1,
+      "numel_per_rank": 6144,
+      "bf16_payload_bytes_per_rank": 12288,
+      "formats": {
+        "nccl": {
+          "label": "BF16 NCCL",
+          "timing_us": {
+            "median_of_three_sweep_medians": 11.17440015077591,
+            "sweep_medians": [
+              11.01439967751503,
+              11.212799698114395,
+              11.17440015077591
+            ],
+            "min_sweep_median": 11.01439967751503,
+            "max_sweep_median": 11.212799698114395
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.8653845890744474,
+            "paired": [
+              1.8386751090989393,
+              1.8717947697433104,
+              1.8653845890744474
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0004359057580330499,
+                0.00045964682401010556
+              ],
+              "rmse": [
+                0.00194802511319799,
+                0.002057545099433553
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1017,
+                "max_abs": 0.015625,
+                "rmse": 0.00194802511319799,
+                "relative_l2": 0.0004359057580330499
+              },
+              {
+                "input_set": 1,
+                "seed": 8794,
+                "max_abs": 0.015625,
+                "rmse": 0.002021873670303541,
+                "relative_l2": 0.00045200909577408117
+              },
+              {
+                "input_set": 2,
+                "seed": 16571,
+                "max_abs": 0.015625,
+                "rmse": 0.002057545099433553,
+                "relative_l2": 0.00045964682401010556
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-mxfp8-lamport-batched": {
+          "label": "MXFP8 E4M3 + E8M0, group32",
+          "timing_us": {
+            "median_of_three_sweep_medians": 5.804799869656563,
+            "sweep_medians": [
+              5.804799869656563,
+              5.8240000158548355,
+              5.7920001447200775
+            ],
+            "min_sweep_median": 5.7920001447200775,
+            "max_sweep_median": 5.8240000158548355
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.9252746681987434,
+            "paired": [
+              1.8974641546370297,
+              1.9252746681987434,
+              1.9292817457821314
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 0.9690170455160264,
+            "paired": [
+              0.9690170455160264,
+              0.9722221980381283,
+              0.9668803393556288
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0065843792013153156,
+                0.006748910443905641
+              ],
+              "rmse": [
+                0.029425020896393535,
+                0.030188428634165213
+              ],
+              "max_abs": [
+                0.171875,
+                0.1875
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1017,
+                "max_abs": 0.171875,
+                "rmse": 0.029425020896393535,
+                "relative_l2": 0.0065843792013153156
+              },
+              {
+                "input_set": 1,
+                "seed": 8794,
+                "max_abs": 0.1875,
+                "rmse": 0.030188428634165213,
+                "relative_l2": 0.006748910443905641
+              },
+              {
+                "input_set": 2,
+                "seed": 16571,
+                "max_abs": 0.171875,
+                "rmse": 0.030175701159769086,
+                "relative_l2": 0.006741123295029795
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-ue8m0-lamport-batched": {
+          "label": "FP8 E4M3 + UE8M0, group128",
+          "timing_us": {
+            "median_of_three_sweep_medians": 5.990400165319443,
+            "sweep_medians": [
+              5.990400165319443,
+              5.990400165319443,
+              5.990400165319443
+            ],
+            "min_sweep_median": 5.990400165319443,
+            "max_sweep_median": 5.990400165319443
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.8653845890744472,
+            "paired": [
+              1.8386751090989393,
+              1.8717947697433104,
+              1.8653845890744472
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0065843792013153156,
+                0.006748910443905641
+              ],
+              "rmse": [
+                0.029425020896393535,
+                0.030188428634165213
+              ],
+              "max_abs": [
+                0.171875,
+                0.1875
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1017,
+                "max_abs": 0.171875,
+                "rmse": 0.029425020896393535,
+                "relative_l2": 0.0065843792013153156
+              },
+              {
+                "input_set": 1,
+                "seed": 8794,
+                "max_abs": 0.1875,
+                "rmse": 0.030188428634165213,
+                "relative_l2": 0.006748910443905641
+              },
+              {
+                "input_set": 2,
+                "seed": 16571,
+                "max_abs": 0.171875,
+                "rmse": 0.030175703088727048,
+                "relative_l2": 0.0067411237259508
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp4": {
+          "label": "NVFP4 upstream L2",
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.243199855089188,
+            "sweep_medians": [
+              6.243199855089188,
+              6.268800050020218,
+              6.243199855089188
+            ],
+            "min_sweep_median": 6.243199855089188,
+            "max_sweep_median": 6.268800050020218
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.7886676251666749,
+            "paired": [
+              1.7642234644365207,
+              1.7886676251666749,
+              1.7898514239724392
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0422008017483193,
+            "paired": [
+              1.0422008017483193,
+              1.046474338444455,
+              1.0422008017483193
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.06331401170253324,
+                0.06494217679254968
+              ],
+              "rmse": [
+                0.28320875491103925,
+                0.29070462499947625
+              ],
+              "max_abs": [
+                2.453125,
+                2.48828125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1017,
+                "max_abs": 2.48828125,
+                "rmse": 0.28902257179597707,
+                "relative_l2": 0.06467401389942048
+              },
+              {
+                "input_set": 1,
+                "seed": 8794,
+                "max_abs": 2.453125,
+                "rmse": 0.28320875491103925,
+                "relative_l2": 0.06331401170253324
+              },
+              {
+                "input_set": 2,
+                "seed": 16571,
+                "max_abs": 2.453125,
+                "rmse": 0.29070462499947625,
+                "relative_l2": 0.06494217679254968
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 4,
+      "numel_per_rank": 24576,
+      "bf16_payload_bytes_per_rank": 49152,
+      "formats": {
+        "nccl": {
+          "label": "BF16 NCCL",
+          "timing_us": {
+            "median_of_three_sweep_medians": 11.168000102043152,
+            "sweep_medians": [
+              11.052799969911575,
+              11.168000102043152,
+              11.270400136709213
+            ],
+            "min_sweep_median": 11.052799969911575,
+            "max_sweep_median": 11.270400136709213
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.8416886770464491,
+            "paired": [
+              1.8226912937188682,
+              1.8416886770464491,
+              1.8585752263525466
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.000813287472248114,
+                0.000824877707804632
+              ],
+              "rmse": [
+                0.0019829592995165364,
+                0.002010304628822564
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1068,
+                "max_abs": 0.015625,
+                "rmse": 0.002010304628822564,
+                "relative_l2": 0.000824877707804632
+              },
+              {
+                "input_set": 1,
+                "seed": 8845,
+                "max_abs": 0.015625,
+                "rmse": 0.0019948377508673784,
+                "relative_l2": 0.0008180329153539545
+              },
+              {
+                "input_set": 2,
+                "seed": 16622,
+                "max_abs": 0.015625,
+                "rmse": 0.0019829592995165364,
+                "relative_l2": 0.000813287472248114
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-mxfp8-lamport-batched": {
+          "label": "MXFP8 E4M3 + E8M0, group32",
+          "timing_us": {
+            "median_of_three_sweep_medians": 5.987200140953064,
+            "sweep_medians": [
+              5.987200140953064,
+              5.987200140953064,
+              5.990400165319443
+            ],
+            "min_sweep_median": 5.987200140953064,
+            "max_sweep_median": 5.990400165319443
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.8653126401525955,
+            "paired": [
+              1.8460715709684212,
+              1.8653126401525955,
+              1.8814102273096158
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 0.9873351187368711,
+            "paired": [
+              0.9873351187368711,
+              0.9873351187368711,
+              0.987862827242242
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.012084008410927065,
+                0.01230535507192463
+              ],
+              "rmse": [
+                0.029449866099389172,
+                0.030007578392712102
+              ],
+              "max_abs": [
+                0.1875,
+                0.203125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1068,
+                "max_abs": 0.1875,
+                "rmse": 0.029449866099389172,
+                "relative_l2": 0.012084008410927065
+              },
+              {
+                "input_set": 1,
+                "seed": 8845,
+                "max_abs": 0.1875,
+                "rmse": 0.030007578392712102,
+                "relative_l2": 0.01230535507192463
+              },
+              {
+                "input_set": 2,
+                "seed": 16622,
+                "max_abs": 0.203125,
+                "rmse": 0.02974575594824823,
+                "relative_l2": 0.012199872519399815
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-ue8m0-lamport-batched": {
+          "label": "FP8 E4M3 + UE8M0, group128",
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.063999980688095,
+            "sweep_medians": [
+              6.063999980688095,
+              6.063999980688095,
+              6.063999980688095
+            ],
+            "min_sweep_median": 6.063999980688095,
+            "max_sweep_median": 6.063999980688095
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.8416886770464493,
+            "paired": [
+              1.8226912937188682,
+              1.8416886770464493,
+              1.8585752263525464
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.012084008410927065,
+                0.01230535507192463
+              ],
+              "rmse": [
+                0.029449866099389172,
+                0.030007578392712102
+              ],
+              "max_abs": [
+                0.1875,
+                0.203125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1068,
+                "max_abs": 0.1875,
+                "rmse": 0.029449866099389172,
+                "relative_l2": 0.012084008410927065
+              },
+              {
+                "input_set": 1,
+                "seed": 8845,
+                "max_abs": 0.1875,
+                "rmse": 0.030007578392712102,
+                "relative_l2": 0.01230535507192463
+              },
+              {
+                "input_set": 2,
+                "seed": 16622,
+                "max_abs": 0.203125,
+                "rmse": 0.02974575594824823,
+                "relative_l2": 0.012199872519399815
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp4": {
+          "label": "NVFP4 upstream L2",
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.883200258016586,
+            "sweep_medians": [
+              6.883200258016586,
+              6.883200258016586,
+              6.883200258016586
+            ],
+            "min_sweep_median": 6.883200258016586,
+            "max_sweep_median": 6.883200258016586
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.622501116255659,
+            "paired": [
+              1.6057646960131406,
+              1.622501116255659,
+              1.6373779222220117
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.1350923944487767,
+            "paired": [
+              1.1350923944487767,
+              1.1350923944487767,
+              1.1350923944487767
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.06752581956722872,
+                0.07000923368929865
+              ],
+              "rmse": [
+                0.16464160144773757,
+                0.1706190932477608
+              ],
+              "max_abs": [
+                2.33984375,
+                2.48046875
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1068,
+                "max_abs": 2.48046875,
+                "rmse": 0.1706190932477608,
+                "relative_l2": 0.07000923368929865
+              },
+              {
+                "input_set": 1,
+                "seed": 8845,
+                "max_abs": 2.4609375,
+                "rmse": 0.16935267976143398,
+                "relative_l2": 0.06944728526819458
+              },
+              {
+                "input_set": 2,
+                "seed": 16622,
+                "max_abs": 2.33984375,
+                "rmse": 0.16464160144773757,
+                "relative_l2": 0.06752581956722872
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 16,
+      "numel_per_rank": 98304,
+      "bf16_payload_bytes_per_rank": 196608,
+      "formats": {
+        "nccl": {
+          "label": "BF16 NCCL",
+          "timing_us": {
+            "median_of_three_sweep_medians": 11.20000034570694,
+            "sweep_medians": [
+              11.20000034570694,
+              11.17120012640953,
+              11.209599673748016
+            ],
+            "min_sweep_median": 11.17120012640953,
+            "max_sweep_median": 11.209599673748016
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.7893661149992928,
+            "paired": [
+              1.7893661149992928,
+              1.7930148775429826,
+              1.7881571567611034
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0012761797357455694,
+                0.0012797070142484014
+              ],
+              "rmse": [
+                0.001980709580613872,
+                0.0019933692485722644
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1272,
+                "max_abs": 0.015625,
+                "rmse": 0.0019933692485722644,
+                "relative_l2": 0.0012797070142484014
+              },
+              {
+                "input_set": 1,
+                "seed": 9049,
+                "max_abs": 0.015625,
+                "rmse": 0.001980709580613872,
+                "relative_l2": 0.0012761797357455694
+              },
+              {
+                "input_set": 2,
+                "seed": 16826,
+                "max_abs": 0.015625,
+                "rmse": 0.0019876812664046924,
+                "relative_l2": 0.0012788394112149325
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-mxfp8-lamport-batched": {
+          "label": "MXFP8 E4M3 + E8M0, group32",
+          "timing_us": {
+            "median_of_three_sweep_medians": 5.9967998415231705,
+            "sweep_medians": [
+              6.022400036454201,
+              5.9967998415231705,
+              5.993599817156792
+            ],
+            "min_sweep_median": 5.993599817156792,
+            "max_sweep_median": 6.022400036454201
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.8628602624115727,
+            "paired": [
+              1.859723744339831,
+              1.8628602624115727,
+              1.870261615008117
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 0.9621676985333575,
+            "paired": [
+              0.9621676985333575,
+              0.9625063745907751,
+              0.9561000142503286
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.019003837439786203,
+                0.019149055088269383
+              ],
+              "rmse": [
+                0.029601826617778427,
+                0.029763094360803568
+              ],
+              "max_abs": [
+                0.1875,
+                0.203125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1272,
+                "max_abs": 0.1875,
+                "rmse": 0.029601826617778427,
+                "relative_l2": 0.019003837439786203
+              },
+              {
+                "input_set": 1,
+                "seed": 9049,
+                "max_abs": 0.1953125,
+                "rmse": 0.029612072496850276,
+                "relative_l2": 0.01907918617841837
+              },
+              {
+                "input_set": 2,
+                "seed": 16826,
+                "max_abs": 0.203125,
+                "rmse": 0.029763094360803568,
+                "relative_l2": 0.019149055088269383
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-ue8m0-lamport-batched": {
+          "label": "FP8 E4M3 + UE8M0, group128",
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.2591999769210815,
+            "sweep_medians": [
+              6.2591999769210815,
+              6.230400130152702,
+              6.268800050020218
+            ],
+            "min_sweep_median": 6.230400130152702,
+            "max_sweep_median": 6.268800050020218
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.789366114999293,
+            "paired": [
+              1.789366114999293,
+              1.7930148775429826,
+              1.7881571567611034
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.019003837439786203,
+                0.019149055088269383
+              ],
+              "rmse": [
+                0.029601826617778427,
+                0.029763094360803568
+              ],
+              "max_abs": [
+                0.1875,
+                0.203125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1272,
+                "max_abs": 0.1875,
+                "rmse": 0.029601826617778427,
+                "relative_l2": 0.019003837439786203
+              },
+              {
+                "input_set": 1,
+                "seed": 9049,
+                "max_abs": 0.1953125,
+                "rmse": 0.029612072496850276,
+                "relative_l2": 0.01907918617841837
+              },
+              {
+                "input_set": 2,
+                "seed": 16826,
+                "max_abs": 0.203125,
+                "rmse": 0.029763094360803568,
+                "relative_l2": 0.019149055088269383
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp4": {
+          "label": "NVFP4 upstream L2",
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.4768001437187195,
+            "sweep_medians": [
+              6.4768001437187195,
+              6.4768001437187195,
+              6.4768001437187195
+            ],
+            "min_sweep_median": 6.4768001437187195,
+            "max_sweep_median": 6.4768001437187195
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.7292490268622598,
+            "paired": [
+              1.7292490268622598,
+              1.7248023527858116,
+              1.7307311365195086
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0347648529524496,
+            "paired": [
+              1.0347648529524496,
+              1.0395480239501051,
+              1.0331802086585662
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.08045612883678861,
+                0.08153858502247661
+              ],
+              "rmse": [
+                0.12532460266041162,
+                0.12673422207433338
+              ],
+              "max_abs": [
+                2.3984375,
+                2.4609375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 1272,
+                "max_abs": 2.4609375,
+                "rmse": 0.12532460266041162,
+                "relative_l2": 0.08045612883678861
+              },
+              {
+                "input_set": 1,
+                "seed": 9049,
+                "max_abs": 2.4453125,
+                "rmse": 0.126467377037097,
+                "relative_l2": 0.081483477127231
+              },
+              {
+                "input_set": 2,
+                "seed": 16826,
+                "max_abs": 2.3984375,
+                "rmse": 0.12673422207433338,
+                "relative_l2": 0.08153858502247661
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 64,
+      "numel_per_rank": 393216,
+      "bf16_payload_bytes_per_rank": 786432,
+      "formats": {
+        "nccl": {
+          "label": "BF16 NCCL",
+          "timing_us": {
+            "median_of_three_sweep_medians": 12.854400277137756,
+            "sweep_medians": [
+              12.854400277137756,
+              12.928000092506409,
+              12.851199507713318
+            ],
+            "min_sweep_median": 12.851199507713318,
+            "max_sweep_median": 12.928000092506409
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.945113173965969,
+            "paired": [
+              1.9452785945642557,
+              1.945113173965969,
+              1.9326274613325218
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0015955381165640849,
+                0.0016047371759947717
+              ],
+              "rmse": [
+                0.001981964226600173,
+                0.001997418777449876
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 2088,
+                "max_abs": 0.015625,
+                "rmse": 0.001997418777449876,
+                "relative_l2": 0.0016047371759947717
+              },
+              {
+                "input_set": 1,
+                "seed": 9865,
+                "max_abs": 0.015625,
+                "rmse": 0.001981964226600173,
+                "relative_l2": 0.001596415612449538
+              },
+              {
+                "input_set": 2,
+                "seed": 17642,
+                "max_abs": 0.015625,
+                "rmse": 0.001982770095197663,
+                "relative_l2": 0.0015955381165640849
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-mxfp8-lamport-batched": {
+          "label": "MXFP8 E4M3 + E8M0, group32",
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.268800050020218,
+            "sweep_medians": [
+              6.265600025653839,
+              6.268800050020218,
+              6.268800050020218
+            ],
+            "min_sweep_median": 6.265600025653839,
+            "max_sweep_median": 6.268800050020218
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 2.051583284044109,
+            "paired": [
+              2.051583284044109,
+              2.0622766700725625,
+              2.0500254283388526
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 0.9431873046876532,
+            "paired": [
+              0.9481840730977763,
+              0.9431873046876532,
+              0.9427334093599712
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.024004167860737675,
+                0.024072348792817708
+              ],
+              "rmse": [
+                0.02982990233844651,
+                0.02989563814756042
+              ],
+              "max_abs": [
+                0.234375,
+                0.328125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 2088,
+                "max_abs": 0.328125,
+                "rmse": 0.02989563814756042,
+                "relative_l2": 0.024018319281411467
+              },
+              {
+                "input_set": 1,
+                "seed": 9865,
+                "max_abs": 0.234375,
+                "rmse": 0.029886035807680168,
+                "relative_l2": 0.024072348792817708
+              },
+              {
+                "input_set": 2,
+                "seed": 17642,
+                "max_abs": 0.265625,
+                "rmse": 0.02982990233844651,
+                "relative_l2": 0.024004167860737675
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-ue8m0-lamport-batched": {
+          "label": "FP8 E4M3 + UE8M0, group128",
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.646399945020676,
+            "sweep_medians": [
+              6.60799965262413,
+              6.646399945020676,
+              6.649599969387054
+            ],
+            "min_sweep_median": 6.60799965262413,
+            "max_sweep_median": 6.649599969387054
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.945113173965969,
+            "paired": [
+              1.9452785945642554,
+              1.945113173965969,
+              1.9326274613325218
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.024004167860737675,
+                0.024072348792817708
+              ],
+              "rmse": [
+                0.02982990233844651,
+                0.02989563814756042
+              ],
+              "max_abs": [
+                0.234375,
+                0.328125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 2088,
+                "max_abs": 0.328125,
+                "rmse": 0.02989563814756042,
+                "relative_l2": 0.024018319281411467
+              },
+              {
+                "input_set": 1,
+                "seed": 9865,
+                "max_abs": 0.234375,
+                "rmse": 0.029886035807680168,
+                "relative_l2": 0.024072348792817708
+              },
+              {
+                "input_set": 2,
+                "seed": 17642,
+                "max_abs": 0.265625,
+                "rmse": 0.02982990233844651,
+                "relative_l2": 0.024004167860737675
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp4": {
+          "label": "NVFP4 upstream L2",
+          "timing_us": {
+            "median_of_three_sweep_medians": 6.883200258016586,
+            "sweep_medians": [
+              6.8800002336502075,
+              6.886400282382965,
+              6.883200258016586
+            ],
+            "min_sweep_median": 6.8800002336502075,
+            "max_sweep_median": 6.886400282382965
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.8683720698535224,
+            "paired": [
+              1.8683720698535224,
+              1.8773233565262362,
+              1.8670384451979358
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0361098247694365,
+            "paired": [
+              1.041162317694442,
+              1.0361098247694365,
+              1.0351299761948034
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0894823999699128,
+                0.09033235572298469
+              ],
+              "rmse": [
+                0.11109319795398928,
+                0.1122557284573011
+              ],
+              "max_abs": [
+                2.42578125,
+                2.49609375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 2088,
+                "max_abs": 2.42578125,
+                "rmse": 0.1113975960659398,
+                "relative_l2": 0.08949743826464478
+              },
+              {
+                "input_set": 1,
+                "seed": 9865,
+                "max_abs": 2.46875,
+                "rmse": 0.11109319795398928,
+                "relative_l2": 0.0894823999699128
+              },
+              {
+                "input_set": 2,
+                "seed": 17642,
+                "max_abs": 2.49609375,
+                "rmse": 0.1122557284573011,
+                "relative_l2": 0.09033235572298469
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 1024,
+      "numel_per_rank": 6291456,
+      "bf16_payload_bytes_per_rank": 12582912,
+      "formats": {
+        "nccl": {
+          "label": "BF16 NCCL",
+          "timing_us": {
+            "median_of_three_sweep_medians": 49.2576003074646,
+            "sweep_medians": [
+              49.26080107688904,
+              49.2576003074646,
+              49.18079972267151
+            ],
+            "min_sweep_median": 49.18079972267151,
+            "max_sweep_median": 49.26080107688904
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 2.777016041161668,
+            "paired": [
+              2.777196492259169,
+              2.777016041161668,
+              2.7726862229283453
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0017653725265207045,
+                0.001766477562700242
+              ],
+              "rmse": [
+                0.001988632889580902,
+                0.001989016109196469
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 18408,
+                "max_abs": 0.015625,
+                "rmse": 0.001988632889580902,
+                "relative_l2": 0.0017653725265207045
+              },
+              {
+                "input_set": 1,
+                "seed": 26185,
+                "max_abs": 0.015625,
+                "rmse": 0.001989016109196469,
+                "relative_l2": 0.0017662222773071263
+              },
+              {
+                "input_set": 2,
+                "seed": 33962,
+                "max_abs": 0.015625,
+                "rmse": 0.0019887091506819014,
+                "relative_l2": 0.001766477562700242
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-mxfp8-lamport-batched": {
+          "label": "MXFP8 E4M3 + E8M0, group32",
+          "timing_us": {
+            "median_of_three_sweep_medians": 17.504000663757324,
+            "sweep_medians": [
+              17.504000663757324,
+              17.507199943065643,
+              17.475199699401855
+            ],
+            "min_sweep_median": 17.475199699401855,
+            "max_sweep_median": 17.507199943065643
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 2.8142595526110403,
+            "paired": [
+              2.8142595526110403,
+              2.813562446744937,
+              2.8143197542031455
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 0.9868302622203112,
+            "paired": [
+              0.9868302622203112,
+              0.987010629308921,
+              0.9852065383783697
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.02642392546605598,
+                0.026462339806895416
+              ],
+              "rmse": [
+                0.029765665016435273,
+                0.029791432641795228
+              ],
+              "max_abs": [
+                0.375,
+                0.375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 18408,
+                "max_abs": 0.375,
+                "rmse": 0.029765665016435273,
+                "relative_l2": 0.02642392546605598
+              },
+              {
+                "input_set": 1,
+                "seed": 26185,
+                "max_abs": 0.375,
+                "rmse": 0.02977859510792175,
+                "relative_l2": 0.02644303272524434
+              },
+              {
+                "input_set": 2,
+                "seed": 33962,
+                "max_abs": 0.375,
+                "rmse": 0.029791432641795228,
+                "relative_l2": 0.026462339806895416
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-ue8m0-lamport-batched": {
+          "label": "FP8 E4M3 + UE8M0, group128",
+          "timing_us": {
+            "median_of_three_sweep_medians": 17.737600207328796,
+            "sweep_medians": [
+              17.737600207328796,
+              17.737600207328796,
+              17.737600207328796
+            ],
+            "min_sweep_median": 17.737600207328796,
+            "max_sweep_median": 17.737600207328796
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 2.777016041161668,
+            "paired": [
+              2.777196492259169,
+              2.777016041161668,
+              2.772686222928345
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.02642392546605598,
+                0.026462339806895416
+              ],
+              "rmse": [
+                0.029765665016435273,
+                0.029791432641795228
+              ],
+              "max_abs": [
+                0.375,
+                0.375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 18408,
+                "max_abs": 0.375,
+                "rmse": 0.029765665016435273,
+                "relative_l2": 0.02642392546605598
+              },
+              {
+                "input_set": 1,
+                "seed": 26185,
+                "max_abs": 0.375,
+                "rmse": 0.02977859510792175,
+                "relative_l2": 0.02644303272524434
+              },
+              {
+                "input_set": 2,
+                "seed": 33962,
+                "max_abs": 0.375,
+                "rmse": 0.029791432641795228,
+                "relative_l2": 0.026462339806895416
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp4": {
+          "label": "NVFP4 upstream L2",
+          "timing_us": {
+            "median_of_three_sweep_medians": 14.019200205802917,
+            "sweep_medians": [
+              14.01280015707016,
+              14.019200205802917,
+              14.051200449466705
+            ],
+            "min_sweep_median": 14.01280015707016,
+            "max_sweep_median": 14.051200449466705
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 3.513581344467538,
+            "paired": [
+              3.515414515637297,
+              3.513581344467538,
+              3.5001137375802007
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 0.7903662300388574,
+            "paired": [
+              0.7900054118527472,
+              0.7903662300388574,
+              0.7921703209694088
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.09474861664234538,
+                0.09482417370151354
+              ],
+              "rmse": [
+                0.10667676872079385,
+                0.10678543208112759
+              ],
+              "max_abs": [
+                2.32421875,
+                2.453125
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 18408,
+                "max_abs": 2.33984375,
+                "rmse": 0.10673113604447532,
+                "relative_l2": 0.09474861664234538
+              },
+              {
+                "input_set": 1,
+                "seed": 26185,
+                "max_abs": 2.453125,
+                "rmse": 0.10678543208112759,
+                "relative_l2": 0.09482417370151354
+              },
+              {
+                "input_set": 2,
+                "seed": 33962,
+                "max_abs": 2.32421875,
+                "rmse": 0.10667676872079385,
+                "relative_l2": 0.09475599704563689
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 4096,
+      "numel_per_rank": 25165824,
+      "bf16_payload_bytes_per_rank": 50331648,
+      "formats": {
+        "nccl": {
+          "label": "BF16 NCCL",
+          "timing_us": {
+            "median_of_three_sweep_medians": 118.9344048500061,
+            "sweep_medians": [
+              118.995201587677,
+              118.9344048500061,
+              118.85119676589966
+            ],
+            "min_sweep_median": 118.85119676589966,
+            "max_sweep_median": 118.995201587677
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 2.2852754756401783,
+            "paired": [
+              2.2852754756401783,
+              2.2860747163842547,
+              2.279287935775496
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0017752676092720342,
+                0.001776068136610327
+              ],
+              "rmse": [
+                0.0019878879609473,
+                0.0019893664527365308
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 70632,
+                "max_abs": 0.015625,
+                "rmse": 0.0019893664527365308,
+                "relative_l2": 0.001776068136610327
+              },
+              {
+                "input_set": 1,
+                "seed": 78409,
+                "max_abs": 0.015625,
+                "rmse": 0.0019883598348510692,
+                "relative_l2": 0.0017753575452013062
+              },
+              {
+                "input_set": 2,
+                "seed": 86186,
+                "max_abs": 0.015625,
+                "rmse": 0.0019878879609473,
+                "relative_l2": 0.0017752676092720342
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-mxfp8-lamport-batched": {
+          "label": "MXFP8 E4M3 + E8M0, group32",
+          "timing_us": {
+            "median_of_three_sweep_medians": 53.065598011016846,
+            "sweep_medians": [
+              53.065598011016846,
+              52.88959741592407,
+              53.091198205947876
+            ],
+            "min_sweep_median": 52.88959741592407,
+            "max_sweep_median": 53.091198205947876
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 2.2424170469721765,
+            "paired": [
+              2.2424170469721765,
+              2.2487296304168343,
+              2.2386233647404215
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0181649900003567,
+            "paired": [
+              1.019112603842301,
+              1.0166071925509774,
+              1.0181649900003567
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.02658820004257599,
+                0.02659658934805548
+              ],
+              "rmse": [
+                0.02977261709268089,
+                0.029787571605867643
+              ],
+              "max_abs": [
+                0.359375,
+                0.375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 70632,
+                "max_abs": 0.375,
+                "rmse": 0.029783327015222526,
+                "relative_l2": 0.02658998197200822
+              },
+              {
+                "input_set": 1,
+                "seed": 78409,
+                "max_abs": 0.359375,
+                "rmse": 0.029787571605867643,
+                "relative_l2": 0.02659658934805548
+              },
+              {
+                "input_set": 2,
+                "seed": 86186,
+                "max_abs": 0.375,
+                "rmse": 0.02977261709268089,
+                "relative_l2": 0.02658820004257599
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-ue8m0-lamport-batched": {
+          "label": "FP8 E4M3 + UE8M0, group128",
+          "timing_us": {
+            "median_of_three_sweep_medians": 52.07039713859558,
+            "sweep_medians": [
+              52.07039713859558,
+              52.0255982875824,
+              52.14400291442871
+            ],
+            "min_sweep_median": 52.0255982875824,
+            "max_sweep_median": 52.14400291442871
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 2.2852754756401783,
+            "paired": [
+              2.2852754756401783,
+              2.2860747163842547,
+              2.279287935775496
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.02658820004257599,
+                0.02659658934805548
+              ],
+              "rmse": [
+                0.02977261709268089,
+                0.029787571605867643
+              ],
+              "max_abs": [
+                0.359375,
+                0.375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 70632,
+                "max_abs": 0.375,
+                "rmse": 0.029783327015222526,
+                "relative_l2": 0.02658998197200822
+              },
+              {
+                "input_set": 1,
+                "seed": 78409,
+                "max_abs": 0.359375,
+                "rmse": 0.029787571605867643,
+                "relative_l2": 0.02659658934805548
+              },
+              {
+                "input_set": 2,
+                "seed": 86186,
+                "max_abs": 0.375,
+                "rmse": 0.02977261709268089,
+                "relative_l2": 0.02658820004257599
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp4": {
+          "label": "NVFP4 upstream L2",
+          "timing_us": {
+            "median_of_three_sweep_medians": 33.91680121421814,
+            "sweep_medians": [
+              33.91680121421814,
+              33.91680121421814,
+              33.99679958820343
+            ],
+            "min_sweep_median": 33.91680121421814,
+            "max_sweep_median": 33.99679958820343
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 3.5066515883622906,
+            "paired": [
+              3.5084441140573555,
+              3.5066515883622906,
+              3.4959525074571993
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 0.6519252508493206,
+            "paired": [
+              0.6513643658976119,
+              0.6519252508493206,
+              0.6519790903662329
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.09505773967479433,
+                0.09507767568030306
+              ],
+              "rmse": [
+                0.10646494413156629,
+                0.10647981417006334
+              ],
+              "max_abs": [
+                2.44140625,
+                2.484375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 70632,
+                "max_abs": 2.45703125,
+                "rmse": 0.10647377456076064,
+                "relative_l2": 0.09505773967479433
+              },
+              {
+                "input_set": 1,
+                "seed": 78409,
+                "max_abs": 2.484375,
+                "rmse": 0.10647981417006334,
+                "relative_l2": 0.09507320465091483
+              },
+              {
+                "input_set": 2,
+                "seed": 86186,
+                "max_abs": 2.44140625,
+                "rmse": 0.10646494413156629,
+                "relative_l2": 0.09507767568030306
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    },
+    {
+      "rows": 16384,
+      "numel_per_rank": 100663296,
+      "bf16_payload_bytes_per_rank": 201326592,
+      "formats": {
+        "nccl": {
+          "label": "BF16 NCCL",
+          "timing_us": {
+            "median_of_three_sweep_medians": 398.4127998352051,
+            "sweep_medians": [
+              398.23999404907227,
+              398.4895944595337,
+              398.4127998352051
+            ],
+            "min_sweep_median": 398.23999404907227,
+            "max_sweep_median": 398.4895944595337
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 2.1942486301753372,
+            "paired": [
+              2.1916384474047126,
+              2.1942486301753372,
+              2.196651346567023
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.0017779853950321365,
+                0.0017781907873679315
+              ],
+              "rmse": [
+                0.0019884110640564666,
+                0.001988884757329316
+              ],
+              "max_abs": [
+                0.015625,
+                0.015625
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 279528,
+                "max_abs": 0.015625,
+                "rmse": 0.0019884110640564666,
+                "relative_l2": 0.0017779853950321365
+              },
+              {
+                "input_set": 1,
+                "seed": 287305,
+                "max_abs": 0.015625,
+                "rmse": 0.001988884757329316,
+                "relative_l2": 0.0017779985571356807
+              },
+              {
+                "input_set": 2,
+                "seed": 295082,
+                "max_abs": 0.015625,
+                "rmse": 0.001988805187488376,
+                "relative_l2": 0.0017781907873679315
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-mxfp8-lamport-batched": {
+          "label": "MXFP8 E4M3 + E8M0, group32",
+          "timing_us": {
+            "median_of_three_sweep_medians": 189.9456024169922,
+            "sweep_medians": [
+              189.97759819030762,
+              189.9456024169922,
+              189.8975968360901
+            ],
+            "min_sweep_median": 189.8975968360901,
+            "max_sweep_median": 189.97759819030762
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 2.09791429435002,
+            "paired": [
+              2.096247125148621,
+              2.09791429435002,
+              2.0980402410205046
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0459190997862775,
+            "paired": [
+              1.0455057617547492,
+              1.0459190997862775,
+              1.0470015320099644
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.026632244028959463,
+                0.026637962138296747
+              ],
+              "rmse": [
+                0.029784752694507248,
+                0.02979304451530809
+              ],
+              "max_abs": [
+                0.375,
+                0.375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 279528,
+                "max_abs": 0.375,
+                "rmse": 0.029784752694507248,
+                "relative_l2": 0.026632750261127144
+              },
+              {
+                "input_set": 1,
+                "seed": 287305,
+                "max_abs": 0.375,
+                "rmse": 0.029791061410085324,
+                "relative_l2": 0.026632244028959463
+              },
+              {
+                "input_set": 2,
+                "seed": 295082,
+                "max_abs": 0.375,
+                "rmse": 0.02979304451530809,
+                "relative_l2": 0.026637962138296747
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp8-ue8m0-lamport-batched": {
+          "label": "FP8 E4M3 + UE8M0, group128",
+          "timing_us": {
+            "median_of_three_sweep_medians": 181.60640001296997,
+            "sweep_medians": [
+              181.7088007926941,
+              181.60640001296997,
+              181.37279748916626
+            ],
+            "min_sweep_median": 181.37279748916626,
+            "max_sweep_median": 181.7088007926941
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 2.1942486301753372,
+            "paired": [
+              2.1916384474047126,
+              2.1942486301753372,
+              2.196651346567023
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 1.0,
+            "paired": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.026632244028959463,
+                0.026637962138296747
+              ],
+              "rmse": [
+                0.029784752694507248,
+                0.02979304451530809
+              ],
+              "max_abs": [
+                0.375,
+                0.375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 279528,
+                "max_abs": 0.375,
+                "rmse": 0.029784752694507248,
+                "relative_l2": 0.026632750261127144
+              },
+              {
+                "input_set": 1,
+                "seed": 287305,
+                "max_abs": 0.375,
+                "rmse": 0.029791061410085324,
+                "relative_l2": 0.026632244028959463
+              },
+              {
+                "input_set": 2,
+                "seed": 295082,
+                "max_abs": 0.375,
+                "rmse": 0.02979304451530809,
+                "relative_l2": 0.026637962138296747
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        },
+        "fp4": {
+          "label": "NVFP4 upstream L2",
+          "timing_us": {
+            "median_of_three_sweep_medians": 106.0096025466919,
+            "sweep_medians": [
+              105.93600273132324,
+              106.0096025466919,
+              106.13759756088257
+            ],
+            "min_sweep_median": 105.93600273132324,
+            "max_sweep_median": 106.13759756088257
+          },
+          "speedup_vs_bf16_nccl": {
+            "median": 3.75899526916931,
+            "paired": [
+              3.7592507153502437,
+              3.75899526916931,
+              3.75373862788507
+            ]
+          },
+          "latency_ratio_to_group128": {
+            "median": 0.5837327458675514,
+            "paired": [
+              0.582998744525216,
+              0.5837327458675514,
+              0.5851902767680603
+            ]
+          },
+          "accuracy": {
+            "ranges_across_three_seeds": {
+              "relative_l2": [
+                0.09514019324855968,
+                0.0951632687911296
+              ],
+              "rmse": [
+                0.10641639649192705,
+                0.10642590039534121
+              ],
+              "max_abs": [
+                2.41796875,
+                2.4375
+              ]
+            },
+            "per_seed": [
+              {
+                "input_set": 0,
+                "seed": 279528,
+                "max_abs": 2.41796875,
+                "rmse": 0.10642590039534121,
+                "relative_l2": 0.0951632687911296
+              },
+              {
+                "input_set": 1,
+                "seed": 287305,
+                "max_abs": 2.4375,
+                "rmse": 0.10642465338456744,
+                "relative_l2": 0.09514019324855968
+              },
+              {
+                "input_set": 2,
+                "seed": 295082,
+                "max_abs": 2.42578125,
+                "rmse": 0.10641639649192705,
+                "relative_l2": 0.095146903808015
+              }
+            ],
+            "identical_metrics_in_all_three_sweeps": true
+          }
+        }
+      }
+    }
+  ]
+}

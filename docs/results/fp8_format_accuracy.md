@@ -1,5 +1,7 @@
 # Four-format synthetic accuracy on GB200 TP2
 
+**Historical study:** group32 below is an accuracy-only numerical reference. A later [four-format AllReduce study](fp8_group32_gb200_tp2.md) measures the actual group32 kernel; these original results remain unchanged.
+
 BF16 input/output, hidden size 6144, seven row counts and three identical native CUDA-generated inputs per shape. The FP32 reference sums the original BF16 sources in rank order with a +0 seed. All 84 format/input/shape records passed on both ranks.
 
 MXFP8 group32 is a **local GPU numerical reference with no communication or timing**. BF16 NCCL, group128 FP8 and NVFP4 use actual AllReduce outputs. Their 63 seed-level metric records exactly match [the performance artifact](fp8_gb200_tp2.json).
